@@ -7,6 +7,7 @@ const nodemailer = require("nodemailer");
 const { v4: uuidv4 } = require("uuid");
 const crypto = require("crypto");
 const app = express();
+const axios = require('axios');
 
 app.use(cors());
 app.use(bodyParser.json());
@@ -126,28 +127,33 @@ app.post("/fetch-ical", async (req, res) => {
   }
 });
 
-app.post("/insert-events", async (req, res) => {
+app.post('/insert-events', async (req, res) => {
   const { userId, events } = req.body;
+
   try {
-    await Promise.all(
-      events.map(async (event) => {
-        await db.query(
-          "INSERT INTO events (user_id, title, description, start_time, end_time, location) VALUES ($1, $2, $3, $4, $5, $6)",
-          [
-            userId,
-            event.title,
-            event.description,
-            event.start,
-            event.end,
-            event.location,
-          ]
-        );
-      })
-    );
-    res.status(200).json({ message: "Events inserted successfully" });
+    // Start a transaction
+    await db.query('BEGIN');
+
+    // Delete existing events for the user
+    await db.query('DELETE FROM events WHERE user_id = $1', [userId]);
+
+    // Insert new events
+    await Promise.all(events.map(async (event) => {
+      await db.query(
+        'INSERT INTO events (user_id, title, description, start_time, end_time, location) VALUES ($1, $2, $3, $4, $5, $6)',
+        [userId, event.title, event.description, event.start, event.end, event.location]
+      );
+    }));
+
+    // Commit the transaction
+    await db.query('COMMIT');
+
+    res.status(200).json({ message: 'Events inserted successfully' });
   } catch (error) {
-    console.error("Error inserting events:", error);
-    res.status(500).json({ message: "Error inserting events" });
+    // Rollback the transaction in case of an error
+    await db.query('ROLLBACK');
+    console.error('Error inserting events:', error);
+    res.status(500).json({ message: 'Error inserting events' });
   }
 });
 
@@ -162,67 +168,124 @@ app.get("/unique-event-titles", async (req, res) => {
   }
 });
 
-app.post("/submit-preferences", async (req, res) => {
-  const { userId, preferences } = req.body;
+
+app.post('/submit-preferences', async (req, res) => {
+  const { userId, preferences, labelWeights, studyModel, pomodoroSettings } = req.body;
+
   try {
+    // Start a transaction
+    await db.query('BEGIN');
+
     // Delete existing preferences for the user
-    await db.query("DELETE FROM user_preferences WHERE user_id = $1", [userId]);
+    await db.query('DELETE FROM user_preferences WHERE user_id = $1', [userId]);
+    await db.query('DELETE FROM user_label_weights WHERE user_id = $1', [userId]);
+    await db.query('DELETE FROM user_study_models WHERE user_id = $1', [userId]);
 
-    // Insert new preferences
-    await Promise.all(
-      preferences.map(async (pref) => {
-        await db.query(
-          "INSERT INTO user_preferences (user_id, preference_type, preference_value) VALUES ($1, $2, $3)",
-          [userId, pref.type, pref.priority]
-        );
-      })
+    // Insert new event preferences
+    for (const pref of preferences) {
+      await db.query(
+        'INSERT INTO user_preferences (user_id, event_type, priority, event_label, focus_level, estimated_duration) VALUES ($1, $2, $3, $4, $5, $6)',
+        [userId, pref.type, pref.priority, pref.label, pref.focusLevel, pref.estimatedDuration]
+      );
+    }
+
+    // Insert label weights
+    for (const [label, weight] of Object.entries(labelWeights)) {
+      await db.query(
+        'INSERT INTO user_label_weights (user_id, label_name, weight) VALUES ($1, $2, $3)',
+        [userId, label, weight]
+      );
+    }
+
+    // Insert study model settings
+    await db.query(
+      'INSERT INTO user_study_models (user_id, study_model, pomodoro_length, break_length, extended_breaks) VALUES ($1, $2, $3, $4, $5)',
+      [userId, studyModel, pomodoroSettings.pomodoroLength, pomodoroSettings.breakLength, pomodoroSettings.extendedBreaks]
     );
-    res.status(200).json({ message: "Preferences saved successfully" });
+
+    // Commit the transaction
+    await db.query('COMMIT');
+
+    res.status(200).json({ message: 'Preferences saved successfully' });
   } catch (error) {
-    console.error("Error saving preferences:", error);
-    res.status(500).json({ message: "Error saving preferences" });
+    // Rollback the transaction in case of an error
+    await db.query('ROLLBACK');
+    console.error('Error saving preferences:', error);
+    res.status(500).json({ message: 'Error saving preferences' });
   }
 });
 
-const Papa = require("papaparse");
 
-app.get("/export-csv", async (req, res) => {
-  const userId = req.query.userId;
-  const query = `
-    SELECT e.event_id, e.user_id, e.title, e.description, e.start_time, e.end_time, e.event_type, e.location, p.preference_id, p.preference_type, p.preference_value
-    FROM events e
-    LEFT JOIN user_preferences p ON e.title = p.preference_type
-    WHERE e.user_id = $1;
-  `;
+const Papa = require('papaparse');
 
-  try {
-    const result = await db.query(query, [userId]);
-    const formattedData = result.rows.map((row) => ({
-      event_id: row.event_id,
+app.get('/export-csv', async (req, res) => {
+const userId = req.query.userId;
+const query = `
+  SELECT 
+    e.event_id, e.user_id, e.title, e.description, e.start_time, e.end_time, 
+    e.event_type, e.location, e.url,
+    uep.priority, uep.event_label, uep.focus_level, uep.estimated_duration,
+    ulw.label_name, ulw.weight,
+    usm.study_model, usm.pomodoro_length, usm.break_length, usm.extended_breaks
+  FROM 
+    events e
+    LEFT JOIN user_preferences uep ON e.title = uep.event_type AND e.user_id = uep.user_id
+    LEFT JOIN user_label_weights ulw ON e.user_id = ulw.user_id
+    LEFT JOIN user_study_models usm ON e.user_id = usm.user_id
+  WHERE 
+    e.user_id = $1;
+`;
+
+try {
+  const result = await db.query(query, [userId]);
+  const formattedData = result.rows.map(row => {
+    return {
       user_id: row.user_id,
-      title: row.title,
-      description: row.description,
-      start_time: row.start_time,
-      end_time: row.end_time,
-      event_type: row.event_type,
-      location: row.location,
-      preference_id: row.preference_id,
-      preference_type: row.preference_type,
-      preference_value: row.preference_value,
-    }));
+      "Type of Task": row.title,
+      "Estimated Duration (hours)": row.estimated_duration,
+      "Deadline": row.end_time ? row.end_time.toISOString().replace('T', ' ').substring(0, 19) : '',
+      "Priority": row.priority,
+      "Pomodoro Length (minutes)": row.pomodoro_length,
+      "Break Length (minutes)": row.break_length,
+      "Extended Breaks": row.extended_breaks,
+      "Focus Level": row.focus_level
+    };
+  });
 
-    const csv = Papa.unparse(formattedData, {
-      header: true,
-    });
+  const csv = Papa.unparse(formattedData, {
+    header: true
+  });
+  
+  res.setHeader('Content-Type', 'text/csv');
+  res.attachment('export.csv');
+  res.send(csv);
+} catch (error) {
+  console.error('Error generating CSV:', error);
+  res.status(500).send('Error generating CSV');
+}
+});
 
-    res.setHeader("Content-Type", "text/csv");
-    res.attachment("export.csv");
-    res.send(csv);
+app.post('/process-calendar', async (req, res) => {
+  try {
+      const { userId, preferences } = req.body;
+      // Fetch the user's calendar data from your database
+      const calendarData = await fetchCalendarData(userId);
+
+      // Send data to Python service for processing
+      const response = await axios.post('http://localhost:5000/process', { calendarData, preferences });
+
+      // Return the processed data to the frontend
+      res.json(response.data);
   } catch (error) {
-    console.error("Error generating CSV:", error);
-    res.status(500).send("Error generating CSV");
+      console.error('Error processing calendar:', error);
+      res.status(500).send('Error processing calendar');
   }
 });
+
+function fetchCalendarData(userId) {
+  // Implement the logic to fetch calendar data from your database
+  return ;
+}
 
 let otpStorage;
 let emailStorage;

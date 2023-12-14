@@ -68,7 +68,7 @@ function LoginPage() {
               onChange={handleEmailChange}
             />
           </div>
-          <div className="input-group">
+          <div className="input-group-table">
             <input
               type={showPassword ? "text" : "password"}
               id="password"
