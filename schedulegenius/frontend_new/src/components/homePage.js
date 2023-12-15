@@ -1,9 +1,10 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from 'react';
 import { useNavigate } from "react-router-dom";
 import ICAL from "ical.js";
 import FullCalendar from "@fullcalendar/react";
 import dayGridPlugin from "@fullcalendar/daygrid";
-import { useSelector } from "react-redux";
+import { useSelector, useDispatch } from 'react-redux';
+import { setCalendarEvents } from '../redux/reducers/calendarSlice';
 import myImage from "./images/planner2.jpg";
 import "./css/style.css"; // Import your custom CSS file
 
@@ -11,25 +12,31 @@ function HomePage() {
   const [icalLink, setIcalLink] = useState("");
   const [calendarUploaded, setCalendarUploaded] = useState(false);
   const navigate = useNavigate();
-  const [calendarEvents, setCalendarEvents] = useState([]);
   const userId = useSelector((state) => state.user.user_id);
+  const dispatch = useDispatch();
+  const calendarEvents = useSelector(state => state.calendar.calendarEvents);
+
+  useEffect(() => {
+    if (calendarEvents.length > 0) {
+      setCalendarUploaded(true);
+    }
+  }, [calendarEvents]);
 
   const parseAndDisplayIcalData = (icalData) => {
     const jcalData = ICAL.parse(icalData);
     const comp = new ICAL.Component(jcalData);
-    const events = comp
-      .getAllSubcomponents("vevent")
-      .map((vevent) => new ICAL.Event(vevent));
+    const events = comp.getAllSubcomponents('vevent').map(vevent => new ICAL.Event(vevent));
 
-    const parsedEvents = events.map((event) => ({
+    const parsedEvents = events.map(event => ({
       title: event.summary,
-      description: event.description,
+      description: event.description, 
       start: event.startDate.toJSDate(),
       end: event.endDate.toJSDate(),
-      location: event.location,
+      location: event.location,  
     }));
-
-    setCalendarEvents(parsedEvents);
+    
+    dispatch(setCalendarEvents(parsedEvents)); // Dispatch parsed events to Redux store
+    setCalendarUploaded(true);
   };
 
   const handleIcalSubmit = async (e) => {
@@ -60,23 +67,23 @@ function HomePage() {
 
   const handlePreferencesClick = async () => {
     try {
-      const response = await fetch("http://localhost:3001/insert-events", {
-        method: "POST",
+      const response = await fetch('http://localhost:3001/insert-events', {
+        method: 'POST',
         headers: {
-          "Content-Type": "application/json",
+          'Content-Type': 'application/json',
         },
         body: JSON.stringify({ userId, events: calendarEvents }),
       });
 
       if (response.ok) {
         // Handle successful event insertion
-        navigate("/submit-preferences"); // Navigate to preferences page
+        navigate('/submit-preferences'); // Navigate to preferences page
       } else {
         // Handle errors from the server
-        console.log("Failed to insert events");
+        console.log('Failed to insert events');
       }
     } catch (error) {
-      console.error("Error inserting events:", error);
+      console.error('Error inserting events:', error);
       // Handle network errors or other exceptions
     }
   };

@@ -8,9 +8,11 @@ import SignupPage from './components/signupPage';
 import LandingPage from './components/landingPage';
 import HomePage from './components/homePage';
 import PreferencePage from './components/preferencePage';
+import Dashboard from './components/dashBoard';
 import ForgotPass from './components/resetPassword/forgotPassword';
 import VerifyOtp from './components/resetPassword/verifyOtp';
 import ResetPass from './components/resetPassword/resetPassword';
+
 
 function App() {
   const dispatch = useDispatch();
@@ -32,6 +34,7 @@ function App() {
         <Route path="/forgotpass" element={<ForgotPass />} />
         <Route path="/verifyotp" element={<VerifyOtp />} />
         <Route path="/resetpass" element={<ResetPass />} />
+        <Route path="/dashboard" element={<Dashboard />} />
         <Route path="/" element={<LandingPage />} />
       </Routes>
     </Router>

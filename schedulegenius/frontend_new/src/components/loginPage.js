@@ -33,7 +33,7 @@ function LoginPage() {
       if (response.ok) {
         console.log("Redirecting to home page:", data);
 
-        // Dispatch user_id to Redux store and save it to local storage
+        // Dispatch to Redux store and save it to local storage
         dispatch(setUser({ user_id: data.user_id }));
         localStorage.setItem("userId", data.user_id);
 
@@ -68,7 +68,7 @@ function LoginPage() {
               onChange={handleEmailChange}
             />
           </div>
-          <div className="input-group-table">
+          <div className="input-group">
             <input
               type={showPassword ? "text" : "password"}
               id="password"
@@ -92,8 +92,8 @@ function LoginPage() {
               <button type="back">back</button>
             </Link>
           </div>
-          <div className = "misc-group">
-          <Link to="/forgotpass">Forgot password?</Link>
+          <div className="misc-group">
+            <Link to="/forgotpass">Forgot password?</Link>
           </div>
         </div>
       </form>
